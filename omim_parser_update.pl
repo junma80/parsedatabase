@@ -5,13 +5,15 @@
 my $username="root";
 my $password="twist3\\!twist";
 my $databasename="codDB";
-my $date =`date`;
+my $date =`date +"%Y-%m-%d %k:%M:%S"`;
+chomp($date);
 my $outfolder="/space1/databaseUpdates/";
-@datecols=split(/\s/,$date);
-$datestring="$datecols[1]_$datecols[2]_$datecols[5]";
-my $omimtext="$datestring.omim.txt";
-my $omimzip="$datestring.omim.txt.Z";
-my $genemap="$datestring.genemap2.txt";
+@datecols=split(/-/,$date);
+$datestring="$datecols[1]_$datecols[0]";
+my $omimtext="omim.$datestring.txt";
+my $omimzip="omim.$datestring.txt.Z";
+my $genemap="omim.genemap2.$datestring.txt";
+
 unless (-e "$outfolder$genemap"){
 	`wget ftp://anonymous:junm%40bcm.edu\@ftp.omim.org/OMIM/genemap2.txt -O $genemap`;
 	`mv $genemap $outfolder`;
@@ -25,9 +27,10 @@ unless (-e "$outfolder$omimtext"){
 
 open(OMIM, "<$outfolder$omimtext");
 open(GENEMAP, "<$outfolder$genemap");
-#open(OUT, ">omim_input_table_new.txt");
-open(TEMPOUT,">$outfolder$datestring.INSERT_record_to_OMIMtemp.sql");
-open(UPDATEOUT,">$outfolder$datestring.UPDATE_record_in_OMIM.sql");
+open(OUT, ">$outfolder$datestring.omim.update.sql");
+
+my @tempout=();
+my @updateout=();
 
 #write SQL to update METADAT table
  $tempTable = "OMIMtemp";
@@ -44,21 +47,20 @@ open(UPDATEOUT,">$outfolder$datestring.UPDATE_record_in_OMIM.sql");
 chomp($md5sum);
 chomp($file);
 chomp($date);
-print "$md5sum\t$file\t$date\n";
 #print SQLOUT "INSERT INTO METADATA VALUES ('$destTable','$file','$md5sum','$date');\n";
 #
+print OUT "DROP TABLE IF EXISTS $tempTable;\n"; 
+print OUT "CREATE table $tempTable LIKE $destTable;\n";
 
-print TEMPOUT "CREATE table $tempTable LIKE $destTable;\n";
 
+push(@updateout,"UPDATE  METADATA SET  fileLocation='$file',insertDate='$date',md5Sum='$md5sum' where tableName='$destTable';\n");
+push(@updateout, "DROP TABLE IF EXISTS omim_add,omim_remove;\n");
 
-print UPDATEOUT "UPDATE  METADATA SET  fileLocation='$file',insertDate='$date',md5Sum='$md5sum' where tableName='$destTable';\n";
-print UPDATEOUT "DROP TABLE IF EXISTS omim_add,omim_remove;\n";
+push(@updateout,"CREATE table $removeTable as select omimID,gene,title,description,clinFeat,clinFeatSum from $destTable where (omimID,gene,title,description,clinFeat,clinFeatSum) NOT IN (select $destTable.omimID, $destTable.gene,$destTable.title,$destTable.description,$destTable.clinFeat,$destTable.clinFeatSum from $destTable,$tempTable where $tempTable.omimID=$destTable.omimID and $tempTable.gene=$destTable.gene and $tempTable.title=$destTable.title and $tempTable.description=$destTable.description and $tempTable.clinFeat=$destTable.clinFeat and $tempTable.clinFeatSum=$destTable.clinFeatSum);\n");
 
-print UPDATEOUT "CREATE table $removeTable as select omimID,gene,title,description,clinFeat,clinFeatSum from $destTable where (omimID,gene,title,description,clinFeat,clinFeatSum) NOT IN (select $destTable.omimID, $destTable.gene,$destTable.title,$destTable.description,$destTable.clinFeat,$destTable.clinFeatSum from $destTable,$tempTable where $tempTable.omimID=$destTable.omimID and $tempTable.gene=$destTable.gene and $tempTable.title=$destTable.title and $tempTable.description=$destTable.description and $tempTable.clinFeat=$destTable.clinFeat and $tempTable.clinFeatSum=$destTable.clinFeatSum);\n";
+push(@updateout, "DELETE FROM $destTable where (omimID, gene) in (SELECT omimID, gene from $removeTable);\n");
 
-print UPDATEOUT "DELETE FROM $destTable where (omimID, gene) in (SELECT omimID, gene from $removeTable);\n";
-
-print UPDATEOUT  "CREATE table $addTable as select omimID,gene,title,description,clinFeat,clinFeatSum from $tempTable where (omimID,gene,title,description,clinFeat,clinFeatSum) NOT IN (select $tempTable.omimID, $tempTable.gene,$tempTable.title,$tempTable.description,$tempTable.clinFeat,$tempTable.clinFeatSum from $destTable,$tempTable where $tempTable.omimID=$destTable.omimID and $tempTable.gene=$destTable.gene and $tempTable.title=$destTable.title and $tempTable.description=$destTable.description and $tempTable.clinFeat=$destTable.clinFeat and $tempTable.clinFeatSum=$destTable.clinFeatSum);\n";
+push(@updateout, "CREATE table $addTable as select omimID,gene,title,description,clinFeat,clinFeatSum from $tempTable where (omimID,gene,title,description,clinFeat,clinFeatSum) NOT IN (select $tempTable.omimID, $tempTable.gene,$tempTable.title,$tempTable.description,$tempTable.clinFeat,$tempTable.clinFeatSum from $destTable,$tempTable where $tempTable.omimID=$destTable.omimID and $tempTable.gene=$destTable.gene and $tempTable.title=$destTable.title and $tempTable.description=$destTable.description and $tempTable.clinFeat=$destTable.clinFeat and $tempTable.clinFeatSum=$destTable.clinFeatSum);\n");
 
 
 #creast hash for genemap(omimID/genes)
@@ -89,7 +91,7 @@ foreach my $key  (keys %idhash){
 #write insert sql for OMIM table
 my $cnt=0;
 #Process omim file
-print UPDATEOUT "LOCK TABLES OMIM WRITE;\n";
+push(@updateout, "LOCK TABLES OMIM WRITE;\n");
 while($line = <OMIM>){
     chomp($line);
     if ($line eq "*RECORD*"){
@@ -102,13 +104,32 @@ while($line = <OMIM>){
     push(@record,$line);
 }
 procRec(@record);
-print UPDATEOUT "UNLOCK TABLES;\n";
-#close OUT;
-print UPDATEOUT "DROP TABLE $tempTable;";
+push(@updateout, "UNLOCK TABLES;\n");
+push(@updateout, "DROP TABLE $tempTable;");
 #print UPDATEOUT "DROP TABLE omim_add;";
 #print UPDATEOUT "DROP TABLE omim_remove;";
-close UPDATEOUT;
-close TEMPOUT;
+$newline = "INSERT INTO $tempTable VALUES ";
+$count=0;
+foreach my $line(@tempout){
+	$count+=1;
+	if ($count <=5000){
+		$newline.=$line;
+	}else{
+		$newline =~ s/.$//;
+		print OUT "$newline;\n";
+		$count=0;
+		$newline ="INSERT INTO $tempTable VALUES ";
+	}
+}
+$newline =~ s/,$//;
+print OUT "$newline;\n";
+foreach my $line(@updateout){
+	print OUT $line;
+}
+
+
+close OUT;
+
 #`mysql --user=testma --password=testma test < /home/ma/omim_test/testsql.sql`;
 #`mysql --user=testma --password=testma test < /home/ma/omim_test/INSERT_record.sql`;
 #`mysqldump -u $username -p$password $databasename OMIM > $outfolder$datestring.omim_backup.sql`;
@@ -118,8 +139,7 @@ close TEMPOUT;
 #`mysqldump -u $username -p$password $databasename omim_remove > $outfolder$datestring.omim_remove.sql`;
 
 print "mysqldump -u $username -p$password $databasename OMIM > $outfolder$datestring.omim_backup.sql\n";
-print "mysql --user=$username --password=$password $databasename < $outfolder$datestring.INSERT_record_to_OMIMtemp.sql\n";
-print "mysql --user=$username --password=$password $databasename < $outfolder$datestring.UPDATE_record_in_OMIM.sql\n";
+print "mysql --user=$username --password=$password $databasename < $outfolder$datestring.omim.update.sql\n";
 
 
 
@@ -226,13 +246,13 @@ sub procRec(){
 	if ($#genes != -1){
 		foreach $gene (@genes){
 #			print OUT "$omimID\t$gene\t$title\t$desc\t$clinicfeats\t$cs\n";
-		        print TEMPOUT  "INSERT INTO $tempTable VALUES ('$omimID','$gene','$title','$desc','$clinicfeats','$cs');\n";
-			print UPDATEOUT "INSERT INTO $destTable (omimID,gene,title,description,clinFeat,clinFeatSum) VALUES ('$omimID','$gene','$title','$desc','$clinicfeats','$cs') ON DUPLICATE KEY UPDATE omimID='$omimID',gene='$gene',title='$title',description='$desc',clinFeat='$clinicfeats',clinFeatSum='$cs';\n";
+		        push(@tempout, "('$omimID','$gene','$title','$desc','$clinicfeats','$cs'),");
+			push(@updateout, "INSERT INTO $destTable (omimID,gene,title,description,clinFeat,clinFeatSum) VALUES ('$omimID','$gene','$title','$desc','$clinicfeats','$cs') ON DUPLICATE KEY UPDATE omimID='$omimID',gene='$gene',title='$title',description='$desc',clinFeat='$clinicfeats',clinFeatSum='$cs';\n");
 		}
 	}else{
-		print TEMPOUT "INSERT INTO $tempTable VALUES ('$omimID','NULL','$title','$desc','$clinicfeats','$cs');\n";
+		push(@tempout,"('$omimID','NULL','$title','$desc','$clinicfeats','$cs'),");
 	#	print OUT "$omimID\tnull\t$title\t$desc\t$clincfeats\t$cs\n";
-		print UPDATEOUT "INSERT INTO $destTable (omimID,gene,title,description,clinFeat,clinFeatSum) VALUES ('$omimID','NULL','$title','$desc','$clinicfeats','$cs') ON DUPLICATE KEY UPDATE omimID='$omimID',gene='NULL',title='$title',description='$desc',clinFeat='$clinicfeats',clinFeatSum='$cs';\n";
+		push(@updateout, "INSERT INTO $destTable (omimID,gene,title,description,clinFeat,clinFeatSum) VALUES ('$omimID','NULL','$title','$desc','$clinicfeats','$cs') ON DUPLICATE KEY UPDATE omimID='$omimID',gene='NULL',title='$title',description='$desc',clinFeat='$clinicfeats',clinFeatSum='$cs';\n");
 	}
 }
 
