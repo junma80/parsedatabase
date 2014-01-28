@@ -135,18 +135,6 @@ foreach my $line(@updateout){
 
 close OUT;
 
-#`mysql --user=testma --password=testma test < /home/ma/omim_test/testsql.sql`;
-#`mysql --user=testma --password=testma test < /home/ma/omim_test/INSERT_record.sql`;
-#`mysqldump -u $username -p$password $databasename OMIM > $outfolder$datestring.omim_backup.sql`;
-#`mysql --user=$username --password=$password $databasename < $outfolder$datestring.INSERT_record_to_OMIMtemp.sql`;
-#`mysql --user=$username --password=$password $databasename < $outfolder$datestring.UPDATE_record_in_OMIM.sql`;
-#`mysqldump -u $username -p$password $databasename omim_add > $outfolder$datestring.omim_add.sql`;
-#`mysqldump -u $username -p$password $databasename omim_remove > $outfolder$datestring.omim_remove.sql`;
-
-print "mysqldump -u $username -p$password $databasename OMIM > $outfolder$datestring.omim_backup.sql\n";
-print "mysql --user=$username --password=$password $databasename < $outfolder$datestring.omim.update.sql\n";
-
-
 
 sub uniq {
     return keys %{{ map { $_ => 1 } @_ }};
@@ -211,7 +199,7 @@ sub procRec(){
 	 if ($descpos != 0){
 	 	for ($i = $descpos; $i <= $#record; $i++){
 			$uc=uc($record[$i]);
-			last if($reocrd[$i] eq $uc);
+			last if($record[$i] eq $uc && $record[$i] ne "");
 			last if($record[$i]=~/^\*FIELD\*/);
 			$desc.=$record[$i]." ";
 	 	} 
@@ -224,7 +212,7 @@ sub procRec(){
 	if ($cfpos != 0){
 		for ($i = $cfpos; $i <= $#record; $i++){
                 	$uc=uc($record[$i]);
-                	last if($reocrd[$i] eq $uc);
+                	last if($record[$i] eq $uc && $record[$i] ne "");
                 	last if($record[$i]=~/^\*FIELD\*/);
                 	$clinicfeats.=$record[$i]." ";
          	}
